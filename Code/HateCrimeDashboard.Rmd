@@ -1,0 +1,330 @@
+---
+title: "Hate Crime Visualization"
+author: "The authors"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    social: menu
+    source_code: embed
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+pkgs2use<- c('flexdashboard','tidyverse','maps','DT','zoo','here','lubridate','tsibble','feasts','fable','hrbrthemes',
+             'ggrepel','robustbase')
+
+inst.load.pkg <- function(pkg){ 
+  if (!require(pkg, character.only = TRUE)) {
+      install.packages(pkg, dependencies = TRUE)
+      library(pkg, character.only = TRUE)
+  }
+}
+
+invisible(lapply(pkgs2use,inst.load.pkg))
+rm(pkgs2use,inst.load.pkg)
+```
+
+```{r message=FALSE}
+HCdat <- read_csv(here('Data','HCdata.csv'),col_types="TiiD??fffffifffddddddiiii")
+#HCdat$QTime <- as.yearqtr(HCdat$QTime, format = "%Y-%q")
+HCdat$QTime <- yearquarter(HCdat$QTime)
+HCdat$QTime <- yearquarter(HCdat$QTime)
+
+TypeVars <- as.character(unique(HCdat$TypeOff))
+RegionVars <- as.character(unique(HCdat$Region))
+Periods <- c('Daily','Weekly','Monthly','Quarterly') 
+Events <- c('Brexit','First Lockdown','Second Lockdown','Third Lockdown')
+Years <- c('2011','2021','Change 2011-21')
+TypeDivers <- c('Ethnicity','Religiosity')
+triggerDates <- as_date(c('2020-01-20','2020-03-26','2020-11-05','2021-01-04'))
+```
+
+Global Hate Crimes {data-icon="fa-signal"}
+=======================================================================
+
+Column {.sidebar data-height=150}
+-----------------------------------------------------------------------
+
+```{r}
+radioButtons("response", "Select Response", choices = c('Counts','Cambridge Hate Crime Index'))
+selectInput("period",label='Select a Periodicity', choices = c(Periods),selected='Daily',width='200px')
+selectInput("tipo_crim",label='Select a Crime Type', choices = c('ALL',TypeVars),selected='ALL',width='200px')
+#selectInput("trigger",label='Select an Event', choices = c('None',Events),selected='None',width='200px')
+checkboxGroupInput("trigger", label = "Select an Event",choices=Events,width='150px', inline = FALSE)
+```
+
+
+Column {data-width=950}
+-----------------------------------------------------------------------
+
+### Global Time Series for `r reactive(ifelse(input$tipo_crim=='ALL','All Racially or Religiously Crimes',paste('Racially or Religiously',input$tipo_crim)))`
+
+```{r}
+
+renderPlot({
+  response <- c('CountOff','CCHI Score')[c('Counts','Cambridge Hate Crime Index') %in% input$response]
+  HCdat.s <- HCdat |> 
+  group_by(Time,TypeOff) |> 
+  summarise(across(all_of(response), ~sum(.,na.rm = TRUE)),.groups="drop") |> 
+  select(Time,TypeOff,all_of(response))
+  
+  if(input$period=='Weekly'){
+    HCdat.s <- HCdat.s |> 
+      mutate(NewTime=yearweek(Time))} else if(input$period=='Monthly'){
+    HCdat.s <- HCdat.s |> 
+      mutate(NewTime=yearmonth(Time))} else if(input$period=='Quarterly'){
+    HCdat.s <- HCdat.s |> 
+      mutate(NewTime=yearquarter(Time))    
+  } else{
+    HCdat.s <- HCdat.s |> 
+      mutate(NewTime=Time)    
+  }
+  HCdat.s <- HCdat.s |> 
+  group_by(NewTime,TypeOff) |> 
+  summarise(across(all_of(response), ~sum(.,na.rm=TRUE)),.groups="drop") |> 
+  select(NewTime,TypeOff,all_of(response))
+  HCdat.s <- HCdat.s|> 
+  as_tsibble(key=TypeOff,index=NewTime)
+  df <- HCdat.s[str_detect(HCdat.s$TypeOff,if_else(input$tipo_crim=="ALL",".*.",input$tipo_crim)),]#HCdat.s |> 
+  colnames(df)[3] <- 'response'
+  #filter(str_detect(TypeOff,if_else(input$tipo_crim=="ALL",".*.",input$tipo_crim)))
+  if(input$tipo_crim!='ALL'){
+  fit_trends <- df |> 
+  model(
+    piecewise = TSLM(response ~ trend(knots = triggerDates[Events %in% input$trigger]))
+  )
+fc_trends <- fit_trends |>  forecast(h = 10)}
+
+  df |> autoplot(response,alpha=0.7) +
+    geom_vline(xintercept = triggerDates[Events %in% input$trigger],
+             linetype = "dashed",
+             lwd = 1.25,
+             color = "#FF0000") +
+    annotate(geom = "text",
+             label = Events[Events %in% input$trigger],
+             x = triggerDates[Events %in% input$trigger],
+             y=20,
+             col="#FF0000",
+             size=3.5,
+             angle = 90, 
+             vjust = 1.3) +
+    scale_y_continuous(limits=c(0,NA)) +
+    ylab(input$response) +
+    xlab(ifelse(input$period=='Weekly','Week',ifelse(input$period=='Monthly','Month',
+                ifelse(input$period=='Quarterly','Quarter','Day')))) +
+    theme_ipsum(axis_title_size = 12) +
+    scale_fill_ipsum() +
+    theme(legend.position='bottom',legend.text=element_text(size=10),legend.margin = margin()) +
+    guides(color=guide_legend(nrow=2,byrow=TRUE,title='Crime Type')) +
+    if(input$tipo_crim!='ALL'){geom_line(data = fitted(fit_trends),
+            aes(y = .fitted),col="#FF0000",lwd=.8)}
+})
+
+```
+
+Hate Crimes By Regions {data-icon="fa-signal"}
+=======================================================================
+
+Column {.sidebar data-height=150}
+-----------------------------------------------------------------------
+
+```{r}
+radioButtons("responseR", "Select Response", choices = c('Counts','Cambridge Hate Crime Index'))
+selectInput("region",label='Select a Region', choices = c(RegionVars),selected=RegionVars[1],width='200px')
+selectInput("periodR",label='Select a Periodicity', choices = c(Periods),selected='Daily',width='200px')
+selectInput("tipo_crimR",label='Select a Crime Type', choices = c('ALL',TypeVars),selected='ALL',width='200px')
+#selectInput("trigger",label='Select an Event', choices = c('None',Events),selected='None',width='200px')
+checkboxGroupInput("triggerR", label = "Select an Event",choices=Events,width='150px', inline = FALSE)
+```
+
+
+Column {data-width=950}
+-----------------------------------------------------------------------
+
+### Time Series for `r reactive(ifelse(input$tipo_crimR=='ALL','All Racially or Religiously Crimes',paste('Racially or Religiously',input$tipo_crimR)))` in `r reactive(input$region)`
+
+```{r}
+
+renderPlot({
+  response <- c('CountOff','CCHI Score')[c('Counts','Cambridge Hate Crime Index') %in% input$responseR]
+  HCdat.s <- HCdat  |>  filter(HCdat$Region == input$region) |> 
+  group_by(Time,TypeOff) |> 
+  summarise(across(all_of(response), ~sum(.,na.rm = TRUE)),.groups="drop") |> 
+  select(Time,TypeOff,all_of(response))
+  
+  if(input$periodR=='Weekly'){
+    HCdat.s <- HCdat.s |> 
+      mutate(NewTime=yearweek(Time))} else if(input$periodR=='Monthly'){
+    HCdat.s <- HCdat.s |> 
+      mutate(NewTime=yearmonth(Time))} else if(input$periodR=='Quarterly'){
+    HCdat.s <- HCdat.s |> 
+      mutate(NewTime=yearquarter(Time))    
+  } else{
+    HCdat.s <- HCdat.s |> 
+      mutate(NewTime=Time)    
+  }
+  HCdat.s <- HCdat.s |> 
+  group_by(NewTime,TypeOff) |> 
+  summarise(across(all_of(response), ~sum(.,na.rm=TRUE)),.groups="drop") |> 
+  select(NewTime,TypeOff,all_of(response))
+  HCdat.s <- HCdat.s|> 
+  as_tsibble(key=TypeOff,index=NewTime)
+  df <- HCdat.s[str_detect(HCdat.s$TypeOff,if_else(input$tipo_crimR=="ALL",".*.",input$tipo_crimR)),]#HCdat.s |> 
+  colnames(df)[3] <- 'response'
+  #filter(str_detect(TypeOff,if_else(input$tipo_crim=="ALL",".*.",input$tipo_crim)))
+  if(input$tipo_crimR!='ALL'){
+  fit_trends <- df |> 
+  model(
+    piecewise = TSLM(response ~ trend(knots = triggerDates[Events %in% input$triggerR]))
+  )
+fc_trends <- fit_trends |>  forecast(h = 10)}
+
+  df |> autoplot(response,alpha=0.7) +
+    geom_vline(xintercept = triggerDates[Events %in% input$triggerR],
+             linetype = "dashed",
+             lwd = 1.25,
+             color = "#FF0000") +
+    annotate(geom = "text",
+             label = Events[Events %in% input$triggerR],
+             x = triggerDates[Events %in% input$triggerR],
+             y=20,
+             col="#FF0000",
+             size=3.5,
+             angle = 90, 
+             vjust = 1.3) +
+    scale_y_continuous(limits=c(0,NA)) +
+    ylab(input$responseR) +
+    xlab(ifelse(input$periodR=='Weekly','Week',ifelse(input$periodR=='Monthly','Month',
+                ifelse(input$periodR=='Quarterly','Quarter','Day')))) +
+    theme_ipsum(axis_title_size = 12) +
+    scale_fill_ipsum() +
+    theme(legend.position='bottom',legend.text=element_text(size=10),legend.margin = margin()) +
+    guides(color=guide_legend(nrow=2,byrow=TRUE,title='Crime Type')) +
+    if(input$tipo_crimR!='ALL'){geom_line(data = fitted(fit_trends),
+            aes(y = .fitted),col="#FF0000",lwd=.8)}
+})
+
+```
+
+Global Diversity {data-icon="fa-signal"}
+=======================================================================
+
+Column {.sidebar data-height=150}
+-----------------------------------------------------------------------
+
+```{r}
+selectInput("yearG",label='Select a Year', choices = c(Years),selected=Years[1],width='200px')
+selectInput("tipo_divG",label='Select Diversity Type', choices = c(TypeDivers),selected=TypeDivers[1],width='200px')
+```
+
+
+Column {data-width=950}
+-----------------------------------------------------------------------
+
+### Diversity (`r reactive(ifelse(input$yearG=='Change 2011-21','Change 2011-2021',ifelse(input$yearG=='2011','year 2011','year 2021')))`) in `r reactive(input$tipo_divG)`
+
+```{r}
+renderPlot({
+pattern <- paste0(c('','','Change\\b.*')[c('2011','2021','Change 2011-21') %in% input$yearG] ,c('eth','relig')[c('Ethnicity','Religiosity') %in% input$tipo_divG],c('2011','2021','')[c('2011','2021','Change 2011-21') %in% input$yearG])
+
+var2select <- colnames(HCdat)[str_detect(colnames(HCdat),pattern)]
+
+df <- HCdat |> group_by(Region) |>
+  select(all_of(c('Region',var2select))) |>
+  distinct_all() |>
+  set_names(c('Region','Diversity'))
+
+ggplot(data = df, mapping = aes(x = reorder(Region, Diversity), Diversity)) + 
+  geom_bar(stat = "identity",fill='blue') + coord_flip() +
+  xlab('Regions') +
+  geom_hline(yintercept = mean(df$Diversity),
+             linetype = "dashed",
+             lwd = 1.25,
+             color = "#FF0000") +
+  ylim(c(0,1)) +
+  theme_ipsum(axis_title_size = 12) +
+  scale_fill_ipsum()
+})
+```
+
+
+Hate Crimes & Diversity {data-icon="fa-signal"}
+=======================================================================
+
+
+Column {.sidebar data-height=150}
+-----------------------------------------------------------------------
+
+```{r}
+radioButtons("responseD", "Select Response", choices = c('Counts','Cambridge Hate Crime Index'))
+selectInput("tipo_crimD",label='Select a Crime Type', choices = c('ALL',TypeVars),selected='ALL',width='200px')
+selectInput("year",label='Select a Year', choices = c(Years),selected=Years[1],width='200px')
+selectInput("tipo_div",label='Select Diversity Type', choices = c(TypeDivers),selected=TypeDivers[1],width='200px')
+```
+
+Column {data-width=950}
+-----------------------------------------------------------------------
+
+
+### Relationship between Linear Change (2015-2022) in `r reactive(ifelse(input$tipo_crimD=='ALL','All Racially or Religiously Crimes',paste('Racially or Religiously',input$tipo_crimD)))` and `r reactive(ifelse(input$year=='Change 2011-21','Change in Diversity 2011-2021',ifelse(input$year=='2011','Diversity (2011)','Diversity (2021)')))` in `r reactive(input$tipo_div)`
+
+
+```{r}
+trend_model <- function(df){
+  lm(Response~Time,data=df)
+}
+mycoeff <- function(mod){
+  coefficients(mod)[2]
+}
+
+myrlm <- function(..., weights = NULL) {
+   lmrob(...)
+}
+
+renderPlot({
+pattern <- paste0(c('','','Change\\b.*')[c('2011','2021','Change 2011-21') %in% input$year] ,c('eth','relig')[c('Ethnicity','Religiosity') %in% input$tipo_div],c('2011','2021','')[c('2011','2021','Change 2011-21') %in% input$year])
+
+df <- HCdat[str_detect(HCdat$TypeOff,if_else(input$tipo_crimD=="ALL",".*.",input$tipo_crimD)),]
+var2select <- colnames(df)[str_detect(colnames(df),pattern)]
+
+response <- c('CountOff','CCHI Score')[c('Counts','Cambridge Hate Crime Index') %in% input$responseD]
+
+df <- df |> group_by(Region) |>
+  select(all_of(c('Region',var2select))) |>
+  distinct_all() |> 
+  left_join(df |> 
+  select(all_of(c('Region',response,'Time'))) |> 
+  group_by(Region) |> set_names(c('Region','Response','Time')) |> 
+  nest() |> 
+  mutate(model = purrr::map(data, trend_model)) |> 
+  mutate(slopes = purrr::map(model, mycoeff)) |> 
+  unnest(slopes) |> select(all_of(c('Region','slopes')))) |>
+  set_names(c('Region','Diversity','Response'))
+
+df |> ggplot(aes(x=Diversity,y=Response))+
+  geom_point(pch=16,color=I('red'),size=4) +
+  geom_smooth(method='lmrob',se=FALSE) +
+    scale_y_continuous(limits=c(NA,NA)) +
+    ylab(paste('Change Magnitude in ',input$responseD)) +
+    xlab(paste('Diversity in',input$tipo_div)) +
+  geom_text_repel(
+    aes(label = Region),
+    family = "Poppins",
+    size = 4,
+    min.segment.length = 0, 
+    seed = 42, 
+    box.padding = 0.5,
+    color = "grey50"
+  ) +
+  labs(subtitle=paste('R-squared=',round(summary(lmrob(Response~Diversity,data=df))$r.squared,3))) +
+    theme_ipsum(axis_title_size = 12) +
+    scale_fill_ipsum()
+})
+```
+
+About this study {data-icon="fa-globe"}
+===========================================
+
+Inputs {.sidebar data-height=400}
+-----------------------------------------------------------------------
