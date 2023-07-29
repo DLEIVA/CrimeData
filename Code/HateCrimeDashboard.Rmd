@@ -12,7 +12,7 @@ runtime: shiny
 
 ```{r setup, include=FALSE}
 pkgs2use<- c('flexdashboard','tidyverse','maps','DT','zoo','here','lubridate','tsibble','feasts','fable','hrbrthemes',
-             'ggrepel','robustbase')
+             'ggrepel','robustbase','sf','plotly')
 
 inst.load.pkg <- function(pkg){ 
   if (!require(pkg, character.only = TRUE)) {
@@ -38,6 +38,8 @@ Events <- c('Brexit','First Lockdown','Second Lockdown','Third Lockdown')
 Years <- c('2011','2021','Change 2011-21')
 TypeDivers <- c('Ethnicity','Religiosity')
 triggerDates <- as_date(c('2020-01-20','2020-03-26','2020-11-05','2021-01-04'))
+
+datENG <- st_read(here('Data','datENG.shp'),quiet=TRUE)
 ```
 
 Global Hate Crimes {data-icon="fa-signal"}
@@ -219,7 +221,7 @@ selectInput("tipo_divG",label='Select Diversity Type', choices = c(TypeDivers),s
 ```
 
 
-Column {data-width=950}
+Column {data-width=375}
 -----------------------------------------------------------------------
 
 ### Diversity (`r reactive(ifelse(input$yearG=='Change 2011-21','Change 2011-2021',ifelse(input$yearG=='2011','year 2011','year 2021')))`) in `r reactive(input$tipo_divG)`
@@ -236,7 +238,7 @@ df <- HCdat |> group_by(Region) |>
   set_names(c('Region','Diversity'))
 
 ggplot(data = df, mapping = aes(x = reorder(Region, Diversity), Diversity)) + 
-  geom_bar(stat = "identity",fill='blue') + coord_flip() +
+  geom_bar(stat = "identity",fill='blue') +         coord_flip() +
   xlab('Regions') +
   geom_hline(yintercept = mean(df$Diversity),
              linetype = "dashed",
@@ -245,6 +247,34 @@ ggplot(data = df, mapping = aes(x = reorder(Region, Diversity), Diversity)) +
   ylim(c(0,1)) +
   theme_ipsum(axis_title_size = 12) +
   scale_fill_ipsum()
+})
+```
+
+Column {data-width=550}
+-----------------------------------------------------------------------
+
+### Diversity map (`r reactive(ifelse(input$yearG=='Change 2011-21','Change 2011-2021',ifelse(input$yearG=='2011','year 2011','year 2021')))`) in `r reactive(input$tipo_divG)`
+
+```{r}
+renderPlotly({
+pattern <- paste0(c('','','Change\\b.*')[c('2011','2021','Change 2011-21') %in% input$yearG] ,c('eth','relig')[c('Ethnicity','Religiosity') %in% input$tipo_divG],c('2011','2021','')[c('2011','2021','Change 2011-21') %in% input$yearG])
+
+var2select <- colnames(HCdat)[str_detect(colnames(HCdat),pattern)]
+
+df <- HCdat |> group_by(Region) |>
+  select(all_of(c('Region',var2select))) |>
+  distinct_all() |>
+  set_names(c('Region','Diversity'))
+
+df <- df |> merge(datENG,by.x="Region",by.y="RGN20NM") |> filter(Region!='England and Wales')
+
+ggplotly(
+  ggplot(data=df,aes(geometry=geometry,fill=Diversity,
+             text = str_c(Region, ": ", round(Diversity,4)))) +
+  geom_sf() +
+  theme_ipsum(axis_title_size =12),
+  width=1.5,height=1,
+  tooltip = 'text')
 })
 ```
 
