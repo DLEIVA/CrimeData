@@ -29,7 +29,7 @@ rm(pkgs2use,inst.load.pkg)
 HCdat <- read_csv(here('Data','HCdata.csv'),col_types="TiiD??fffffifffddddddiiii")
 #HCdat$QTime <- as.yearqtr(HCdat$QTime, format = "%Y-%q")
 HCdat$QTime <- yearquarter(HCdat$QTime)
-HCdat$QTime <- yearquarter(HCdat$QTime)
+HCdat$MTime <- yearmonth(HCdat$Time)
 
 TypeVars <- as.character(unique(HCdat$TypeOff))
 RegionVars <- as.character(unique(HCdat$Region))
@@ -54,6 +54,13 @@ selectInput("period",label='Select a Periodicity', choices = c(Periods),selected
 selectInput("tipo_crim",label='Select a Crime Type', choices = c('ALL',TypeVars),selected='ALL',width='200px')
 #selectInput("trigger",label='Select an Event', choices = c('None',Events),selected='None',width='200px')
 checkboxGroupInput("trigger", label = "Select an Event",choices=Events,width='150px', inline = FALSE)
+
+mind <- min(HCdat$Time)
+maxd <- max(HCdat$Time)
+
+sliderInput("dateranges", label = "Select time period:",
+            min = as.Date(mind), max = as.Date(maxd),
+            value = c(as.Date(mind), as.Date(maxd)),timeFormat="%b %Y")
 ```
 
 
@@ -66,7 +73,8 @@ Column {data-width=950}
 
 renderPlot({
   response <- c('CountOff','CCHI Score')[c('Counts','Cambridge Hate Crime Index') %in% input$response]
-  HCdat.s <- HCdat |> 
+  HCdat.s <- HCdat[between(HCdat$MTime,input$dateranges[1],input$dateranges[2]),]
+  HCdat.s <- HCdat.s |> 
   group_by(Time,TypeOff) |> 
   summarise(across(all_of(response), ~sum(.,na.rm = TRUE)),.groups="drop") |> 
   select(Time,TypeOff,all_of(response))
@@ -138,6 +146,13 @@ selectInput("periodR",label='Select a Periodicity', choices = c(Periods),selecte
 selectInput("tipo_crimR",label='Select a Crime Type', choices = c('ALL',TypeVars),selected='ALL',width='200px')
 #selectInput("trigger",label='Select an Event', choices = c('None',Events),selected='None',width='200px')
 checkboxGroupInput("triggerR", label = "Select an Event",choices=Events,width='150px', inline = FALSE)
+
+mindR <- min(HCdat$Time)
+maxdR <- max(HCdat$Time)
+
+sliderInput("daterangesR", label = "Select time period:",
+            min = as.Date(mindR), max = as.Date(maxdR),
+            value = c(as.Date(mindR), as.Date(maxdR)),timeFormat="%b %Y")
 ```
 
 
@@ -150,7 +165,8 @@ Column {data-width=950}
 
 renderPlot({
   response <- c('CountOff','CCHI Score')[c('Counts','Cambridge Hate Crime Index') %in% input$responseR]
-  HCdat.s <- HCdat  |>  filter(HCdat$Region == input$region) |> 
+  HCdat.s <- HCdat[between(HCdat$MTime,input$daterangesR[1],input$daterangesR[2]),]
+  HCdat.s <- HCdat.s  |>  filter(HCdat.s$Region == input$region) |> 
   group_by(Time,TypeOff) |> 
   summarise(across(all_of(response), ~sum(.,na.rm = TRUE)),.groups="drop") |> 
   select(Time,TypeOff,all_of(response))
